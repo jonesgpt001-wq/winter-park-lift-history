@@ -47,6 +47,7 @@ def extract(feed, checked_at):
     am = sr.get('AllMountain') or {}
     return {
         'checked_at': checked_at,
+        'snow_report_updated': sr.get('LastUpdate'),
         'feed_updated': feed.get('LastUpdate') or r.get('LastUpdate'),
         'resort_status': r.get('OperatingStatus'),
         'lifts': lifts,
@@ -149,6 +150,18 @@ def render(hist, out_path):
         f'<td>{html.escape(e["from"])} &rarr; <b>{html.escape(e["to"])}</b></td></tr>'
         for e in events[:40]) or '<tr><td colspan="3">No status changes recorded yet.</td></tr>'
     sn = cur['snow']
+    sru = parse_ts(cur.get('snow_report_updated'))
+    nowdt = parse_ts(cur['checked_at'])
+    snow_stale = True
+    snow_age_txt = 'unknown date'
+    if sru:
+        snow_age_txt = sru.strftime('%b %-d, %Y')
+        if nowdt and (nowdt - sru).total_seconds() < 36 * 3600:
+            snow_stale = False
+    snow_banner = ('<div class="note" style="margin:0 0 10px;color:#d7a13b">Snow report last updated '
+        + snow_age_txt + ' - off-season, these are end-of-last-season numbers. Fresh daily snow reporting resumes with the season.</div>') if snow_stale else (
+        '<div class="note" style="margin:0 0 10px">Snow report updated ' + snow_age_txt + '</div>')
+    snow_dim = ' style="opacity:.45"' if snow_stale else ''
     def i(v): return f'{v:.0f}&Prime;' if isinstance(v, float) else '&mdash;'
     open_ct = sum(1 for l in cur['lifts'].values() if classify(l['status']) == 'open')
     page = f"""<!doctype html><html><head><meta charset="utf-8">
@@ -175,7 +188,7 @@ td:first-child{{width:55%}}
 <div class="card"><h2 style="margin-top:0">Panoramic Express (Parsenn Bowl)</h2>
 <div class="pano-status">{badge(pano_cur['status'])}</div>
 <div class="sub">Last observed open: {fmt_ts(last_open)}</div></div>
-<div class="card"><h2 style="margin-top:0">Snow</h2><div class="snow-grid">
+<div class="card"><h2 style="margin-top:0">Snow</h2>{snow_banner}<div class="snow-grid"{snow_dim}>
 <div><b>{i(sn['last24_in'])}</b><span class="sub">24h</span></div>
 <div><b>{i(sn['last48_in'])}</b><span class="sub">48h</span></div>
 <div><b>{i(sn['last72_in'])}</b><span class="sub">72h</span></div>
