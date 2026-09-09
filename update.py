@@ -81,6 +81,9 @@ def load_history():
 
 def parse_ts(s):
     if not s: return None
+    s = s.strip()
+    if len(s) >= 5 and s[-5] in '+-' and s[-4:].isdigit() and s[-3] != ':':
+        s = s[:-2] + ':' + s[-2:]
     try: return datetime.datetime.fromisoformat(s)
     except ValueError: return None
 
