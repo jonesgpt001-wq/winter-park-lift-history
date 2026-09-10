@@ -225,7 +225,10 @@ def main():
         diffs = {n: (prev.get(n, {}).get('status'), last[n]['status'])
                  for n in last if prev.get(n, {}).get('status') != last[n]['status']}
         changed = diffs or None
+    off_season = (snap['resort_status'] == 'Closed' and
+                  all(classify(l['status']) == 'season' for l in snap['lifts'].values()))
     print(json.dumps({'checked_at': checked_at, 'checks_total': len(hist),
+                      'resort_status': snap['resort_status'], 'off_season': off_season,
                       'pano': snap['lifts'].get(SPOTLIGHT), 'changes': changed}))
 
 if __name__ == '__main__':
