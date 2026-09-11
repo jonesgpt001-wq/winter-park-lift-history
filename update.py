@@ -218,6 +218,18 @@ def main():
     os.makedirs(DATA, exist_ok=True)
     checked_at = datetime.datetime.now(MT).replace(microsecond=0).isoformat()
     snap = extract(fetch_feed(), checked_at)
+    off_season = (snap['resort_status'] == 'Closed' and
+                  all(classify(l['status']) == 'season' for l in snap['lifts'].values()))
+    # Adaptive cadence in Actions: cron fires hourly; off-season we keep one
+    # snapshot per day instead of hourly duplicates.
+    if os.environ.get('WP_REPO_MODE') and off_season:
+        hist_prev = load_history()
+        last = parse_ts(hist_prev[-1]['checked_at']) if hist_prev else None
+        nowdt = parse_ts(checked_at)
+        if last and nowdt and (nowdt - last).total_seconds() < 20 * 3600:
+            print(json.dumps({'checked_at': checked_at, 'skipped': 'off-season heartbeat fresh',
+                              'resort_status': snap['resort_status'], 'off_season': off_season}))
+            return
     with open(HISTORY, 'a') as f:
         f.write(json.dumps(snap) + '\n')
     hist = load_history()
@@ -228,8 +240,6 @@ def main():
         diffs = {n: (prev.get(n, {}).get('status'), last[n]['status'])
                  for n in last if prev.get(n, {}).get('status') != last[n]['status']}
         changed = diffs or None
-    off_season = (snap['resort_status'] == 'Closed' and
-                  all(classify(l['status']) == 'season' for l in snap['lifts'].values()))
     print(json.dumps({'checked_at': checked_at, 'checks_total': len(hist),
                       'resort_status': snap['resort_status'], 'off_season': off_season,
                       'pano': snap['lifts'].get(SPOTLIGHT), 'changes': changed}))
