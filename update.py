@@ -7,7 +7,10 @@ and regenerates site/index.html.
 import json, os, sys, urllib.request, datetime, html
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(BASE, 'data'); SITE = os.path.join(BASE, 'site')
+DATA = os.path.join(BASE, 'data')
+# In GitHub Actions the repo root IS the site (Pages serves index.html from root);
+# locally the rendered page lives under site/. WP_REPO_MODE=1 renders to BASE.
+SITE = BASE if os.environ.get('WP_REPO_MODE') else os.path.join(BASE, 'site')
 HISTORY = os.path.join(DATA, 'history.jsonl')
 FEED_URL = 'https://mtnpowder.com/feed/v3.json?bearer_token=_pQB-LhuTtus8AXazk55UBp3Xb1puupqQ4p7grG96UA'
 RESORT_NAME = 'Winter Park'   # winter feed, NOT 'Winter Park Summer'
