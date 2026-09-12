@@ -2,7 +2,12 @@ name: lift-check
 on:
   schedule:
     - cron: '7 * * * *'   # hourly, offset from top-of-hour congestion
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Bypass off-season skip (render+publish now)'
+        required: false
+        default: 'false'
 permissions:
   contents: write
 concurrency:
@@ -14,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch feed, append history, render site
-        run: WP_REPO_MODE=1 python3 update.py
+        run: WP_REPO_MODE=1 WP_FORCE=${{ github.event.inputs.force }} python3 update.py
       - name: Commit and publish if changed
         run: |
           git config user.name "github-actions[bot]"
