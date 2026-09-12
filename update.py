@@ -17,6 +17,43 @@ RESORT_NAME = 'Winter Park'   # winter feed, NOT 'Winter Park Summer'
 SPOTLIGHT = 'Panoramic Express'
 MT = datetime.timezone(datetime.timedelta(hours=-6), 'MT')  # America/Denver (MST; feed carries its own offset)
 
+CHART_SCRIPT = """<script>
+const CD = __CHART_DATA__;
+function svgOpen(w,h){return '<svg viewBox="0 0 '+w+' '+h+'" style="width:100%;height:auto;display:block">';}
+function labels(a,b,w,h){const f=function(s){return s.slice(5,10);};
+  return '<text x="0" y="'+(h+12)+'" fill="#8b949e" font-size="10">'+f(a)+'</text>'
+    +'<text x="'+w+'" y="'+(h+12)+'" fill="#8b949e" font-size="10" text-anchor="end">'+f(b)+'</text>';}
+function lineChart(id, pts, key, color, fixedMax){
+  const el=document.getElementById(id); const w=600,h=110;
+  if(!pts.length){el.innerHTML='<div class="note">No data yet.</div>';return;}
+  const vals=pts.map(function(p){return p[key];}).filter(function(v){return v!=null;});
+  if(!vals.length){el.innerHTML='<div class="note">No fresh data yet - this fills in when daily snow reporting resumes with the season.</div>';return;}
+  const max=fixedMax||Math.max(1,...vals);
+  const step=w/Math.max(1,pts.length-1); let d='',started=false;
+  pts.forEach(function(p,i){const v=p[key]; if(v==null){started=false;return;}
+    const x=i*step, y=h-6-(v/max)*(h-26);
+    d+=(started?' L':' M')+x.toFixed(1)+' '+y.toFixed(1); started=true;});
+  el.innerHTML=svgOpen(w,h+16)+'<line x1="0" y1="'+(h-6)+'" x2="'+w+'" y2="'+(h-6)+'" stroke="#2d333b"/>'
+    +'<path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="1.5"/>'
+    +labels(pts[0].t,pts[pts.length-1].t,w,h)
+    +'<text x="'+w+'" y="12" fill="#8b949e" font-size="10" text-anchor="end">max '+max+'</text></svg>';}
+function barChart(id, rows, key, color, fixedMax, emptyMsg){
+  const el=document.getElementById(id); const w=600,h=110;
+  if(!rows.length){el.innerHTML='<div class="note">'+emptyMsg+'</div>';return;}
+  const max=fixedMax||Math.max(1,...rows.map(function(r){return r[key]||0;}));
+  const bw=w/rows.length; let s='';
+  rows.forEach(function(r,i){const v=r[key]||0; const bh=(v/max)*(h-26);
+    s+='<rect x="'+(i*bw+1).toFixed(1)+'" y="'+(h-6-bh).toFixed(1)+'" width="'+Math.max(1,bw-2).toFixed(1)+'" height="'+bh.toFixed(1)+'" fill="'+color+'"/>';});
+  el.innerHTML=svgOpen(w,h+16)+'<line x1="0" y1="'+(h-6)+'" x2="'+w+'" y2="'+(h-6)+'" stroke="#2d333b"/>'+s
+    +labels(rows[0].day,rows[rows.length-1].day,w,h)+'</svg>';}
+lineChart('chart-open', CD.pts, 'open', '#3fb950', 26);
+barChart('chart-pano', CD.pano, 'hours', '#d7a13b', 24, 'No Pano history yet - recording started Sep 9, 2026.');
+barChart('chart-snowbars', CD.snow, 'snow24', '#79b8ff', null,
+  'No fresh snow reports yet - this fills in when daily snow reporting resumes with the season.');
+lineChart('chart-base', CD.pts, 'base', '#79b8ff', null);
+</script>"""
+
+
 def classify(status):
     s = (status or '').lower()
     if 'season' in s: return 'season'
@@ -155,6 +192,33 @@ def render(hist, out_path):
         f'<tr><td>{fmt_ts(e["ts"])}</td><td>{html.escape(e["lift"])}</td>'
         f'<td>{html.escape(e["from"])} &rarr; <b>{html.escape(e["to"])}</b></td></tr>'
         for e in events[:40]) or '<tr><td colspan="3">No status changes recorded yet.</td></tr>'
+    # --- chart series (embedded as JSON, rendered client-side as inline SVG) ---
+    pts = []
+    for c in hist:
+        lifts = c['lifts']
+        oc = sum(1 for l in lifts.values() if classify(l['status']) == 'open')
+        pano_open = 1 if classify(lifts.get(SPOTLIGHT, {}).get('status')) == 'open' else 0
+        sru_c = parse_ts(c.get('snow_report_updated'))
+        cdt = parse_ts(c['checked_at'])
+        fresh = bool(sru_c and cdt and 0 <= (cdt - sru_c).total_seconds() < 36 * 3600)
+        pts.append({'t': c['checked_at'], 'open': oc, 'pano': pano_open,
+                    'snow24': c['snow'].get('last24_in') if fresh else None,
+                    'base': c['snow'].get('base_in') if fresh else None})
+    pano_bars = [{'day': d, 'hours': pano_days[d]['open'], 'samples': pano_days[d]['n']}
+                 for d in sorted(pano_days)[-30:]]
+    snow_daily = {}
+    for p in pts:
+        if p['snow24'] is not None:
+            snow_daily[p['t'][:10]] = {'day': p['t'][:10], 'snow24': p['snow24'], 'base': p['base']}
+    snow_bars = [snow_daily[d] for d in sorted(snow_daily)[-30:]]
+    chart_data = json.dumps({'pts': pts, 'pano': pano_bars, 'snow': snow_bars})
+    charts_html = ('<div class="card"><h2 style="margin-top:0">Trends</h2>'
+        '<h3>Lifts open over time</h3><div id="chart-open"></div>'
+        '<h3>Pano - hours open per day</h3><div id="chart-pano"></div>'
+        '<h3>New snow (24h, inches)</h3><div id="chart-snowbars"></div>'
+        '<h3>Base depth (inches)</h3><div id="chart-base"></div>'
+        '<div class="note">Snow trends only plot readings from a fresh daily snow report; '
+        'off-season and stalled reports show as gaps, never as carried-forward numbers.</div></div>')
     sn = cur['snow']
     sru = parse_ts(cur.get('snow_report_updated'))
     nowdt = parse_ts(cur['checked_at'])
@@ -205,11 +269,14 @@ td:first-child{{width:55%}}
 <div class="card"><h2 style="margin-top:0">Pano by day (last 14 days)</h2>
 <table><tr><th style="text-align:left">Day</th><th style="text-align:left">Pano</th><th style="text-align:left">Snow</th></tr>{''.join(pano_day_rows) or '<tr><td colspan=3>No history yet.</td></tr>'}</table>
 <div class="note">Powder read (inference, not observation): if Pano never opened on a day with new snow, that terrain likely still holds untracked snow. This site records what the resort reported, not conditions on the ground.</div></div>
+{charts_html}
 <h2>Current status, all lifts</h2>{area_html}
 <h2>Recent status changes</h2>
 <table><tr><th style="text-align:left">When</th><th style="text-align:left">Lift</th><th style="text-align:left">Change</th></tr>{ev_html}</table>
 <div class="note">Method: one snapshot per hour from the same feed that powers winterparkresort.com's mountain report. Statuses are the resort's reported values; short openings between checks can be missed. "Open ~Nh" counts hourly samples observed open.</div>
+__CHART_SCRIPT__
 </body></html>"""
+    page = page.replace('__CHART_SCRIPT__', CHART_SCRIPT).replace('__CHART_DATA__', chart_data)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, 'w') as f:
         f.write(page)
@@ -222,7 +289,7 @@ def main():
                   all(classify(l['status']) == 'season' for l in snap['lifts'].values()))
     # Adaptive cadence in Actions: cron fires hourly; off-season we keep one
     # snapshot per day instead of hourly duplicates.
-    if os.environ.get('WP_REPO_MODE') and off_season:
+    if os.environ.get('WP_REPO_MODE') and off_season and not os.environ.get('WP_FORCE'):
         hist_prev = load_history()
         last = parse_ts(hist_prev[-1]['checked_at']) if hist_prev else None
         nowdt = parse_ts(checked_at)
